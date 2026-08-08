@@ -44,13 +44,20 @@ export class AuthService {
     return { sub: user.id, email: user.email, type: user.type, roles, permissions };
   }
 
+  /** Parse a TTL env var to a positive integer, tolerating trailing junk
+   *  (e.g. an inline "# comment" copied from .env.example → NaN → jwt.sign crash). */
+  private intEnv(value: string | undefined, fallback: number): number {
+    const n = Number.parseInt(String(value ?? ""), 10);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  }
+
   private async issueTokens(payload: AuthUser, meta?: { ip?: string; ua?: string }) {
     const accessToken = await this.jwt.signAsync(payload, {
       secret: process.env.JWT_ACCESS_SECRET,
-      expiresIn: Number(process.env.JWT_ACCESS_TTL ?? 900),
+      expiresIn: this.intEnv(process.env.JWT_ACCESS_TTL, 900),
     });
     const refreshToken = randomUUID() + "." + randomUUID();
-    const ttl = Number(process.env.JWT_REFRESH_TTL ?? 1_209_600);
+    const ttl = this.intEnv(process.env.JWT_REFRESH_TTL, 1_209_600);
     await this.prisma.refreshToken.create({
       data: {
         userId: payload.sub,

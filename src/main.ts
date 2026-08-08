@@ -73,8 +73,11 @@ async function bootstrap() {
   SwaggerModule.setup(`${prefix}/docs`, app, document);
 
   const port = Number(process.env.PORT ?? 4000);
-  await app.listen(port);
+  // Bind to 0.0.0.0 (all IPv4 interfaces) — required by Railway/containers, whose
+  // proxy connects over IPv4. Without an explicit host, Node can bind IPv6-only
+  // (`::`) and the platform can't reach the app → "Application failed to respond".
+  await app.listen(port, "0.0.0.0");
   // eslint-disable-next-line no-console
-  console.log(`Agrawal Cycles API running on http://localhost:${port}/${prefix}/v1`);
+  console.log(`Agrawal Cycles API running on http://0.0.0.0:${port}/${prefix}/v1`);
 }
 bootstrap();

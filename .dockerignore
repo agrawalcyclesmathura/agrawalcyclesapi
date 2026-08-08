@@ -1,0 +1,48 @@
+# Dependencies
+node_modules
+npm-debug.log*
+
+# Build output
+dist
+coverage
+
+# TypeScript incremental build cache (must never leak into the image —
+# a stale cache makes tsc skip .js emit, leaving only .d.ts)
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Git
+.git
+.gitignore
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+
+# Temporary
+tmp
+temp
+
+# Prisma cache
+prisma/*.db-journal
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+
+# Documentation
+README.md
+docs

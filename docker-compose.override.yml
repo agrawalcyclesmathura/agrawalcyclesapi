@@ -1,0 +1,13 @@
+# Local dev override: the host already runs a native PostgreSQL on 5432,
+# so expose the container DB/Redis on alternate host ports.
+# NOTE: Windows reserves the TCP range 5433-6032 (winnat/Hyper-V), so the DB
+# is published on 6543 (above that range) rather than 5433. Keep DATABASE_URL
+# in .env in sync with this port.
+# (Auto-merged by `docker compose`; not committed to the base topology.)
+services:
+  db:
+    ports:
+      - "6543:5432"
+  redis:
+    ports:
+      - "6380:6379"

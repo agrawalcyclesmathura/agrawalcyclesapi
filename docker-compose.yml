@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pathway
+      POSTGRES_PASSWORD: pathway
+      POSTGRES_DB: pathway
+    # Bind to localhost only — the API reaches Postgres over the internal Docker
+    # network (db:5432), so the host publish is just for local seeding/psql.
+    # Never expose the database to the public internet.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pathway"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Localhost-only publish (same reasoning as Postgres above). The API uses
+    # redis:6379 over the Docker network; do not expose Redis to the internet.
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://pathway:pathway@db:5432/pathway?schema=public
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - .env
+    ports:
+      - "4000:4000"
+    # Persist uploaded media (product/category/brand images) across container
+    # rebuilds and redeploys. Without this, /app/uploads lives only in the
+    # container's writable layer and every `up --build` / recreate wipes it,
+    # so client-uploaded images would vanish on the next deploy.
+    volumes:
+      - uploads:/app/uploads
+    command: sh -c "npx prisma migrate deploy && node dist/main"
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:

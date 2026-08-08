@@ -126,11 +126,22 @@ export class AuthService {
     return { user: this.publicUser(user), ...tokens };
   }
 
+  // Grace window during which an already-rotated refresh token is still accepted.
+  // The admin UI fires several requests at once (auth/me, notification polls, data
+  // calls); when the access token expires they all refresh with the SAME cookie.
+  // Strict single-use rotation would fail all but the first → the session gets
+  // torn down and the user is logged out. A short grace makes concurrent/retried
+  // refreshes succeed while still rotating the token.
+  private static readonly REFRESH_GRACE_MS = 60_000;
+
   async refresh(refreshToken: string) {
     const stored = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: this.hashToken(refreshToken) },
     });
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
+    const revokedBeyondGrace =
+      !!stored?.revokedAt &&
+      Date.now() - stored.revokedAt.getTime() > AuthService.REFRESH_GRACE_MS;
+    if (!stored || stored.expiresAt < new Date() || revokedBeyondGrace) {
       throw new UnauthorizedException("Invalid refresh token");
     }
     // Re-check the account on every refresh so revoking admin access (disable/
@@ -142,11 +153,14 @@ export class AuthService {
     if (account.type === "STAFF" && account.adminStatus !== "APPROVED") {
       throw new UnauthorizedException("Administrator access is not active");
     }
-    // Rotate: revoke the old token, issue a new pair.
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
-      data: { revokedAt: new Date() },
-    });
+    // Rotate once (mark revoked on first use); concurrent uses within the grace
+    // window are still honoured so the session isn't killed by a refresh race.
+    if (!stored.revokedAt) {
+      await this.prisma.refreshToken.update({
+        where: { id: stored.id },
+        data: { revokedAt: new Date() },
+      });
+    }
     const payload = await this.buildAuthUser(stored.userId);
     return this.issueTokens(payload);
   }

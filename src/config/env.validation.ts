@@ -3,7 +3,10 @@
  * misconfigured container crashes immediately with an actionable message rather
  * than failing deep inside a request later.
  */
-const REQUIRED = ["DATABASE_URL", "REDIS_URL", "JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET"] as const;
+// Hard requirements — the app cannot function without these.
+const REQUIRED = ["DATABASE_URL", "JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET"] as const;
+// Optional but recommended — a missing value degrades a feature, never blocks boot.
+const RECOMMENDED = ["REDIS_URL"] as const;
 
 const INSECURE_DEFAULTS = ["change-me-access-secret", "change-me-refresh-secret"];
 
@@ -13,6 +16,17 @@ export function validateEnv(env: NodeJS.ProcessEnv = process.env): void {
     throw new Error(
       `Missing required environment variable(s): ${missing.join(", ")}. ` +
         `Copy .env.example to .env and fill them in.`,
+    );
+  }
+
+  // REDIS_URL is only needed for Redis-backed features (readiness probe, caching).
+  // Warn, but let the app boot — admin login and the CMS run on Postgres + Firebase.
+  const missingRecommended = RECOMMENDED.filter((k) => !env[k] || String(env[k]).trim() === "");
+  if (missingRecommended.length) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[env] Optional variable(s) not set: ${missingRecommended.join(", ")}. ` +
+        `Related features are disabled until configured; the app will still start.`,
     );
   }
 

@@ -1,7 +1,14 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "rootDir": "src"
+    "rootDir": "src",
+    // Production builds must be a full, deterministic emit. `incremental` (from
+    // the base config) writes tsconfig.build.tsbuildinfo; combined with
+    // nest-cli's `deleteOutDir: true`, a cached buildinfo makes tsc skip
+    // re-emitting "unchanged" files after dist was wiped — silently dropping
+    // e.g. dist/prisma/*.js and crashing `node dist/main.js` at boot. Disabling
+    // it guarantees every build (local, Docker, Railway-cached) emits all files.
+    "incremental": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test", "prisma", "**/*.spec.ts"]

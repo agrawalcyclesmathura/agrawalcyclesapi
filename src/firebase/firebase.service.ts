@@ -110,48 +110,51 @@ export class FirebaseService {
   }
 
   /**
-   * Read the admin-approval record for a Firebase UID from the Firestore `admins`
-   * collection, using the SIGNED-IN USER'S OWN ID token (not a service-account
-   * key). Firestore security rules let each user read only their own `admins/{uid}`
-   * doc and DENY all writes — so the flag can only be set by an admin in the
-   * Firebase console, never forged by the client.
+   * Read the admin-approval record from the Firestore `admins` collection, using
+   * the SIGNED-IN USER'S OWN ID token (no service-account key). It looks the user
+   * up by BOTH their UID and their email as the document id (whichever you used),
+   * and accepts `approved` / `admin` / `isAdmin` as either a boolean `true` or the
+   * string "true". An optional `role` string selects the RBAC role.
    *
-   * A doc grants access when `approved` (or `admin`) is boolean true; an optional
-   * `role` string selects the RBAC role. Returns null when the UID has no doc.
-   * Throws 503 on a Firestore outage/misconfig (fails closed — no session).
+   * Returns the record, or `null` when no matching approved doc is found (missing
+   * doc, rules-denied read, or flag not truthy). Never throws — authorization is
+   * best-effort here; the owner-controlled ADMIN_EMAILS allowlist is the
+   * guaranteed path (see AuthService).
    */
-  async getAdminApproval(idToken: string, uid: string): Promise<AdminApproval | null> {
+  async getAdminApproval(idToken: string, uid: string, email?: string): Promise<AdminApproval | null> {
     const projectId = process.env.FIREBASE_PROJECT_ID;
-    if (!projectId) {
-      throw new ServiceUnavailableException("FIREBASE_PROJECT_ID is not set — admin authorization unavailable.");
-    }
+    if (!projectId) return null;
     const collection = process.env.FIREBASE_ADMIN_COLLECTION ?? "admins";
     const emulator = process.env.FIRESTORE_EMULATOR_HOST;
     const base = emulator ? `http://${emulator}` : "https://firestore.googleapis.com";
-    const docPath = `projects/${projectId}/databases/(default)/documents/${collection}/${encodeURIComponent(uid)}`;
-    const url = `${base}/v1/${docPath}`;
 
-    let res: Response;
-    try {
-      res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
-    } catch {
-      throw new ServiceUnavailableException("Could not reach the admin authorization store (Firestore).");
-    }
+    type Field = { booleanValue?: boolean; stringValue?: string };
+    const truthy = (f?: Field) =>
+      !!f && (f.booleanValue === true || (typeof f.stringValue === "string" && f.stringValue.trim().toLowerCase() === "true"));
 
-    // 404 = no doc for this UID; 403 = rules denied → treat both as "not listed".
-    if (res.status === 404 || res.status === 403) return null;
-    if (!res.ok) {
-      throw new ServiceUnavailableException(
-        `Admin authorization store returned ${res.status}. Check that Firestore is enabled and its rules allow a signed-in user to read their own "${collection}/{uid}" doc.`,
-      );
-    }
-
-    const doc = (await res.json().catch(() => null)) as { fields?: Record<string, { booleanValue?: boolean; stringValue?: string }> } | null;
-    const fields = doc?.fields ?? {};
-    return {
-      // Accept either `approved` or `admin` as the boolean flag.
-      approved: fields.approved?.booleanValue === true || fields.admin?.booleanValue === true,
-      role: fields.role?.stringValue,
+    const readDoc = async (docId: string): Promise<Record<string, Field> | null> => {
+      const url = `${base}/v1/projects/${projectId}/databases/(default)/documents/${collection}/${encodeURIComponent(docId)}`;
+      try {
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${idToken}` },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (!res.ok) return null; // 404 (no doc) / 403 (rules) / other → not found
+        const doc = (await res.json().catch(() => null)) as { fields?: Record<string, Field> } | null;
+        return doc?.fields ?? {};
+      } catch {
+        return null; // network/timeout → treat as not found (fail closed)
+      }
     };
+
+    // Try UID first, then email, so a doc keyed either way is honoured.
+    for (const docId of [uid, email].filter((v): v is string => !!v)) {
+      const fields = await readDoc(docId);
+      if (!fields) continue;
+      if (truthy(fields.approved) || truthy(fields.admin) || truthy(fields.isAdmin)) {
+        return { approved: true, role: fields.role?.stringValue };
+      }
+    }
+    return null;
   }
 }

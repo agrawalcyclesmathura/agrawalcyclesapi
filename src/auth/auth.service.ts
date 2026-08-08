@@ -232,8 +232,19 @@ export class AuthService {
 
     if (user.isBlocked) throw new ForbiddenException("Account is blocked");
 
-    // Authorization gate: Firestore admins/{uid}.approved (set in the console).
-    const approval = await this.firebase.getAdminApproval(idToken, identity.uid);
+    // Authorization gate. Two sources, either grants access:
+    //  1) ADMIN_EMAILS env allowlist (owner-controlled, no Firestore rules needed) —
+    //     the guaranteed path and bootstrap mechanism.
+    //  2) Firestore `admins` doc (approved flag) keyed by uid or email.
+    const allowlist = (process.env.ADMIN_EMAILS ?? "")
+      .toLowerCase()
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const approval = allowlist.includes(identity.email)
+      ? { approved: true, role: process.env.FIREBASE_DEFAULT_ADMIN_ROLE || "super_admin" }
+      : await this.firebase.getAdminApproval(idToken, identity.uid, identity.email);
+
     if (!approval?.approved) {
       // Not (or no longer) an approved admin — ensure no lingering access.
       if (user.type === "STAFF" || user.adminStatus === "APPROVED") {

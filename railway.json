@@ -5,7 +5,9 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "npx prisma migrate deploy || echo '[boot] prisma migrate deploy failed — starting server anyway'; node dist/main",
+    "startCommand": "node dist/main",
+    "healthcheckPath": "/api/v1/health/live",
+    "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }

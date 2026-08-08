@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
@@ -16,6 +17,7 @@ import { generateSecret, otpauthUrl, verifyToken } from "./totp";
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
@@ -241,9 +243,18 @@ export class AuthService {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    const approval = allowlist.includes(identity.email)
+    const allowlisted = allowlist.includes(identity.email);
+    const approval = allowlisted
       ? { approved: true, role: process.env.FIREBASE_DEFAULT_ADMIN_ROLE || "super_admin" }
       : await this.firebase.getAdminApproval(idToken, identity.uid, identity.email);
+
+    // Diagnostic (safe to leave on): shows why access was/ wasn't granted.
+    this.logger.log(
+      `firebaseSession email="${identity.email}" uid=${identity.uid} ` +
+        `allowlistCount=${allowlist.length} allowlisted=${allowlisted} ` +
+        `firestoreApproved=${allowlisted ? "n/a" : approval?.approved === true} ` +
+        `=> ${approval?.approved ? "APPROVED" : "NOT_APPROVED"}`,
+    );
 
     if (!approval?.approved) {
       // Not (or no longer) an approved admin — ensure no lingering access.
